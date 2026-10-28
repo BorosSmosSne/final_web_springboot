@@ -25,11 +25,28 @@ public class OrderItems {
     @JoinColumn(name = "product_id")
     private Product product;
 
+    // NEW: snapshot of the name at order time (history survives product edits)
+    private String productName;
+
     private Integer quantity;
 
-    private Double price;
+    private Double price;    // unit price at order time
+
+    // NEW: copied from CartItems at checkout
+    private String size;
+    private Integer sugar;
+    private String ice;
+    private String note;
 
     public OrderItems() {
+    }
+
+    // NEW: line total
+    public double getSubtotal() {
+        if (price == null || quantity == null) {
+            return 0;
+        }
+        return price * quantity;
     }
 
     public Integer getId() {
@@ -56,6 +73,14 @@ public class OrderItems {
         this.product = product;
     }
 
+    public String getProductName() {
+        return productName;
+    }
+
+    public void setProductName(String productName) {
+        this.productName = productName;
+    }
+
     public Integer getQuantity() {
         return quantity;
     }
@@ -70,5 +95,37 @@ public class OrderItems {
 
     public void setPrice(Double price) {
         this.price = price;
+    }
+
+    public String getSize() {
+        return size;
+    }
+
+    public void setSize(String size) {
+        this.size = size;
+    }
+
+    public Integer getSugar() {
+        return sugar;
+    }
+
+    public void setSugar(Integer sugar) {
+        this.sugar = sugar;
+    }
+
+    public String getIce() {
+        return ice;
+    }
+
+    public void setIce(String ice) {
+        this.ice = ice;
+    }
+
+    public String getNote() {
+        return note;
+    }
+
+    public void setNote(String note) {
+        this.note = note;
     }
 }

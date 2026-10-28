@@ -48,6 +48,8 @@ public class CategoryController {
 	// 3. Create a new category
 	@PostMapping
 	public Object postCategory(@RequestBody Category category) {
+		category.setId(null);        // ignore any id sent by the client
+		category.setProduct(null);   // ignore any products sent by the client
 		try {
 			Category saved = categoryRepos.save(category);
 			return ResponseEntity.status(HttpStatus.CREATED).body(saved);

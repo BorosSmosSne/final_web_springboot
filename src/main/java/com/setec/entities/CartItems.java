@@ -15,41 +15,8 @@ public class CartItems {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
-    
 
-    public Integer getId() {
-		return id;
-	}
-
-	public void setId(Integer id) {
-		this.id = id;
-	}
-
-	public Cart getCart() {
-		return cart;
-	}
-
-	public void setCart(Cart cart) {
-		this.cart = cart;
-	}
-
-	public Product getProduct() {
-		return product;
-	}
-
-	public void setProduct(Product product) {
-		this.product = product;
-	}
-
-	public Integer getQuantity() {
-		return quantity;
-	}
-
-	public void setQuantity(Integer quantity) {
-		this.quantity = quantity;
-	}
-
-	@ManyToOne
+    @ManyToOne
     @JoinColumn(name = "cart_id")
     @JsonIgnore
     private Cart cart;
@@ -60,6 +27,12 @@ public class CartItems {
 
     private Integer quantity;
 
+    // NEW: drink customization
+    private String size;     // S / M / L
+    private Integer sugar;   // 0, 25, 50, 75, 100 (percent)
+    private String ice;      // NONE / LESS / NORMAL
+    private String note;     // e.g. "no straw"
+
     public CartItems() {
     }
 
@@ -69,7 +42,76 @@ public class CartItems {
         this.product = product;
         this.quantity = quantity;
     }
-    
 
-    // getters and setters
+    // NEW: line total shown in the cart
+    public double getSubtotal() {
+        if (product == null || quantity == null) {
+            return 0;
+        }
+        return product.getPrice() * quantity;
+    }
+
+    public Integer getId() {
+        return id;
+    }
+
+    public void setId(Integer id) {
+        this.id = id;
+    }
+
+    public Cart getCart() {
+        return cart;
+    }
+
+    public void setCart(Cart cart) {
+        this.cart = cart;
+    }
+
+    public Product getProduct() {
+        return product;
+    }
+
+    public void setProduct(Product product) {
+        this.product = product;
+    }
+
+    public Integer getQuantity() {
+        return quantity;
+    }
+
+    public void setQuantity(Integer quantity) {
+        this.quantity = quantity;
+    }
+
+    public String getSize() {
+        return size;
+    }
+
+    public void setSize(String size) {
+        this.size = size;
+    }
+
+    public Integer getSugar() {
+        return sugar;
+    }
+
+    public void setSugar(Integer sugar) {
+        this.sugar = sugar;
+    }
+
+    public String getIce() {
+        return ice;
+    }
+
+    public void setIce(String ice) {
+        this.ice = ice;
+    }
+
+    public String getNote() {
+        return note;
+    }
+
+    public void setNote(String note) {
+        this.note = note;
+    }
 }

@@ -1,227 +1,168 @@
 package com.setec.controller;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import com.setec.entities.CartItems;
+
 import com.setec.entities.Order;
-import com.setec.entities.OrderItems;
-import com.setec.repos.CartItemRepos;
-import com.setec.repos.CartRepos;
-import com.setec.repos.OrderItemRepos;
+import com.setec.entities.OrderStatus;
+import com.setec.entities.OrderType;
 import com.setec.repos.OrderRepos;
-import com.setec.repos.ProductRepo;
+import com.setec.service.OrderService;
 import com.setec.telegrambot.MyTelegramBot;
 
-import org.springframework.web.bind.annotation.RequestBody;
-import io.swagger.v3.oas.annotations.media.Content;
-import io.swagger.v3.oas.annotations.media.ExampleObject;
-import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
 
+// Old paths (/api/cart/checkout, /api/cart/orders) still work.
+// New paths (/api/orders/...) are the recommended ones.
 @RestController
-@RequestMapping("/api/cart")
+@RequestMapping("/api")
 public class OrderController {
 
-	private final CartRepos cartRepos;
-	private final CartItemRepos cartItemRepos;
-	private final ProductRepo productRepo;
+	private final OrderService orderService;
 	private final OrderRepos orderRepos;
-	private final OrderItemRepos orderItemRepos;
 	private final MyTelegramBot myTelegramBot;
 
-	public OrderController(
-	        CartRepos cartRepos,
-	        CartItemRepos cartItemRepos,
-	        ProductRepo productRepo,
-	        OrderRepos orderRepos,
-	        OrderItemRepos orderItemRepos,
-	        MyTelegramBot myTelegramBot) {
-
-	    this.cartRepos = cartRepos;
-	    this.cartItemRepos = cartItemRepos;
-	    this.productRepo = productRepo;
-	    this.orderRepos = orderRepos;
-	    this.orderItemRepos = orderItemRepos;
-	    this.myTelegramBot = myTelegramBot;
+	public OrderController(OrderService orderService, OrderRepos orderRepos, MyTelegramBot myTelegramBot) {
+		this.orderService = orderService;
+		this.orderRepos = orderRepos;
+		this.myTelegramBot = myTelegramBot;
 	}
 
-	@PostMapping("/checkout")
+	private static ResponseEntity<?> msg(HttpStatus status, String text) {
+		return ResponseEntity.status(status).body(Map.of("message", text));
+	}
+
+	private static String str(Map<String, Object> map, String key) {
+		Object v = map.get(key);
+		return v == null ? null : v.toString().trim();
+	}
+
+	// ------------------------------------------------------------------
+	// CHECKOUT
+	// ------------------------------------------------------------------
+	@PostMapping({ "/cart/checkout", "/orders/checkout" })
 	@io.swagger.v3.oas.annotations.parameters.RequestBody(required = true, content = @Content(mediaType = "application/json", examples = @ExampleObject(name = "Checkout Example", value = """
 			{
 			  "cartId": 1,
 			  "customerName": "Dara",
 			  "phone": "012345678",
-			  "address": "Phnom Penh"
+			  "orderType": "DELIVERY",
+			  "paymentMethod": "KHQR",
+			  "address": "St. 51, Phnom Penh",
+			  "note": "Call when you arrive"
 			}
 			""")))
-	public Object checkout(
-	        @RequestBody Map<String, Object> request) {
+	public Object checkout(@RequestBody Map<String, Object> request) {
 
-	    // 1. Get customer information from the request
-	    Object cartIdValue = request.get("cartId");
+		Object cartIdValue = request.get("cartId");
+		if (cartIdValue == null) {
+			return msg(HttpStatus.BAD_REQUEST, "cartId is required");
+		}
+		Integer cartId;
+		try {
+			cartId = Integer.valueOf(cartIdValue.toString());
+		} catch (NumberFormatException e) {
+			return msg(HttpStatus.BAD_REQUEST, "cartId must be a number");
+		}
 
-	    if (cartIdValue == null) {
-	        return ResponseEntity.badRequest()
-	                .body(Map.of("message", "cartId is required"));
-	    }
+		OrderType type = null;
+		String typeText = str(request, "orderType");
+		if (typeText != null && !typeText.isBlank()) {
+			try {
+				type = OrderType.valueOf(typeText.toUpperCase());
+			} catch (IllegalArgumentException e) {
+				return msg(HttpStatus.BAD_REQUEST, "orderType must be DINE_IN, TAKEAWAY or DELIVERY");
+			}
+		}
 
-	    Integer cartId = Integer.valueOf(cartIdValue.toString());
+		try {
+			Order order = orderService.placeOrder(cartId,
+					str(request, "customerName"), str(request, "phone"), str(request, "address"),
+					type, str(request, "paymentMethod"), str(request, "note"));
 
-	    String customerName = (String) request.get("customerName");
-	    String phone = (String) request.get("phone");
-	    String address = (String) request.get("address");
+			myTelegramBot.sendNewOrderTicket(order);   // never throws
+			return ResponseEntity.ok(order);
 
-	    // 2. Find the cart
-	    var cart = cartRepos.findById(cartId);
-
-	    if (cart.isEmpty()) {
-	        return ResponseEntity.status(HttpStatus.NOT_FOUND)
-	                .body(Map.of("message", "Cart not found"));
-	    }
-
-	    // 3. Find the items belonging to this cart
-	    var cartItems = cartItemRepos.findAll().stream()
-	            .filter(item -> item.getCart().getId().equals(cartId))
-	            .toList();
-
-	    if (cartItems.isEmpty()) {
-	        return ResponseEntity.badRequest()
-	                .body(Map.of("message", "Cart is empty"));
-	    }
-
-	    // 4. Create the order
-	    Order order = new Order();
-	    order.setCustomerName(customerName);
-	    order.setPhone(phone);
-	    order.setAddress(address);
-
-	    // 5. Calculate the total
-	    double total = 0;
-
-	    for (CartItems item : cartItems) {
-	        total += item.getProduct().getPrice()
-	                * item.getQuantity();
-	    }
-
-	    order.setTotal(total);
-
-	    // 6. Save the order first
-	    Order savedOrder = orderRepos.save(order);
-
-	    // 7. Save each item belonging to the order
-	    List<OrderItems> savedItems = new ArrayList<>();
-
-	    for (CartItems item : cartItems) {
-
-	        OrderItems orderItem = new OrderItems();
-
-	        orderItem.setOrder(savedOrder);
-	        orderItem.setProduct(item.getProduct());
-	        orderItem.setQuantity(item.getQuantity());
-	        orderItem.setPrice(item.getProduct().getPrice());
-
-	        OrderItems savedItem = orderItemRepos.save(orderItem);
-
-	        savedItems.add(savedItem);
-	    }
-
-	    savedOrder.setOrderItems(savedItems);
-
-	    // 9. Return the saved order
-
-	    // Build the Telegram notification
-	    StringBuilder message = new StringBuilder();
-
-	    message.append("NEW ORDER\n\n");
-	    message.append("Order ID: ").append(savedOrder.getId()).append("\n");
-	    message.append("Customer: ").append(customerName).append("\n");
-	    message.append("Phone: ").append(phone).append("\n");
-	    message.append("Address: ").append(address).append("\n\n");
-
-	    message.append("ORDER ITEMS\n");
-
-	    for (CartItems item : cartItems) {
-
-	        String productName = item.getProduct().getName();
-	        int quantity = item.getQuantity();
-	        double price = item.getProduct().getPrice();
-	        double subtotal = price * quantity;
-
-	        message.append("- ").append(productName)
-	                .append(" x ").append(quantity)
-	                .append(" | Price: ").append(price)
-	                .append(" | Subtotal: ").append(subtotal)
-	                .append("\n");
-	    }
-
-	    message.append("\nTotal: ").append(total).append(" Riel");
-
-	    // Send the notification to Telegram
-	    try {
-	        var response = myTelegramBot.message(message.toString());
-
-	        if (response.isOk()) {
-	            System.out.println("Telegram notification sent successfully");
-	        } else {
-	            System.err.println("Telegram notification failed");
-	        }
-
-	    } catch (Exception e) {
-	        System.err.println("Could not send Telegram notification: "
-	                + e.getMessage());
-	    }
-
-	    // Clear the cart after saving the order
-	    cartItemRepos.deleteAll(cartItems);
-
-	    return ResponseEntity.ok(savedOrder);
-
+		} catch (NoSuchElementException e) {
+			return msg(HttpStatus.NOT_FOUND, e.getMessage());
+		} catch (IllegalArgumentException e) {
+			return msg(HttpStatus.BAD_REQUEST, e.getMessage());
+		} catch (IllegalStateException e) {
+			return msg(HttpStatus.CONFLICT, e.getMessage());
+		}
 	}
-	// Added: Get all orders (GET /api/cart/orders)
-    @GetMapping("/orders")
-    public Object getAllOrders() {
-        var orders = orderRepos.findAll();
-        if (orders.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("message", "No orders found"));
-        }
-        return orders;
-    }
 
-    // Added: Get an order by ID (GET /api/cart/orders/{id})
-    @GetMapping("/orders/{id}")
-    public Object getOrderById(@PathVariable("id") Integer id) {
-        var order = orderRepos.findById(id);
-        if (order.isPresent()) {
-            return order.get();
-        }
-        return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                .body(Map.of("message", "Order ID " + id + " not found"));
-    }
+	// ------------------------------------------------------------------
+	// READ
+	// ------------------------------------------------------------------
 
-    // Added: Get item breakdown for an order (GET /api/cart/orders/{id}/items)
-//    @GetMapping("/orders/{id}/items")
-//    public Object getOrderItems(@PathVariable("id") Integer id) {
-//        var items = orderItemRepos.findAll().stream()
-//                .filter(item -> item.getOrder() != null && item.getOrder().getId().equals(id))
-//                .toList();
-//
-//        if (items.isEmpty()) {
-//            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-//                    .body(Map.of("message", "No items found for Order ID " + id));
-//        }
-//        return items;
-//    }
+	// GET /api/orders            all orders (newest first)
+	// GET /api/orders?status=NEW only that status
+	@GetMapping({ "/cart/orders", "/orders" })
+	public Object getAllOrders(@RequestParam(name = "status", required = false) String status) {
+		if (status == null || status.isBlank()) {
+			return orderRepos.findAll(Sort.by(Sort.Direction.DESC, "id"));
+		}
+		try {
+			return orderRepos.findByStatusOrderByIdDesc(OrderStatus.valueOf(status.trim().toUpperCase()));
+		} catch (IllegalArgumentException e) {
+			return msg(HttpStatus.BAD_REQUEST,
+					"status must be NEW, ACCEPTED, PREPARING, READY, COMPLETED or CANCELLED");
+		}
+	}
 
+	@GetMapping({ "/cart/orders/{id}", "/orders/{id}" })
+	public Object getOrderById(@PathVariable("id") Integer id) {
+		var order = orderRepos.findById(id);
+		if (order.isPresent()) {
+			return order.get();
+		}
+		return msg(HttpStatus.NOT_FOUND, "Order ID " + id + " not found");
+	}
+
+	// customer tracking: GET /api/orders/phone/012345678
+	@GetMapping("/orders/phone/{phone}")
+	public Object getOrdersByPhone(@PathVariable("phone") String phone) {
+		return orderRepos.findByPhoneOrderByIdDesc(phone);
+	}
+
+	// ------------------------------------------------------------------
+	// STATUS: PATCH /api/orders/{id}/status   body {"status":"PREPARING"}
+	// ------------------------------------------------------------------
+	@PatchMapping("/orders/{id}/status")
+	public Object updateStatus(@PathVariable("id") Integer id, @RequestBody Map<String, String> body) {
+		String s = body.get("status");
+		if (s == null || s.isBlank()) {
+			return msg(HttpStatus.BAD_REQUEST, "status is required");
+		}
+		OrderStatus next;
+		try {
+			next = OrderStatus.valueOf(s.trim().toUpperCase());
+		} catch (IllegalArgumentException e) {
+			return msg(HttpStatus.BAD_REQUEST,
+					"status must be NEW, ACCEPTED, PREPARING, READY, COMPLETED or CANCELLED");
+		}
+		try {
+			Order order = orderService.changeStatus(id, next);
+			myTelegramBot.refreshTicket(order);       // the Telegram ticket updates too
+			return order;
+		} catch (NoSuchElementException e) {
+			return msg(HttpStatus.NOT_FOUND, e.getMessage());
+		} catch (IllegalStateException e) {
+			return msg(HttpStatus.CONFLICT, e.getMessage());
+		}
+	}
 }
