@@ -17,7 +17,7 @@ bin/
 !**/src/main/**/bin/
 !**/src/test/**/bin/
 
-!**src/main/resources/application.properties
+echo "src/main/resources/application.properties" >> .gitignore
 
 ### IntelliJ IDEA ###
 .idea
