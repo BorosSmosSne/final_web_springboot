@@ -17,6 +17,8 @@ bin/
 !**/src/main/**/bin/
 !**/src/test/**/bin/
 
+echo "src/main/resources/application.properties" >> .gitignore
+
 ### IntelliJ IDEA ###
 .idea
 *.iws
@@ -35,3 +37,4 @@ out/
 
 ### VS Code ###
 .vscode/
+src/main/resources/application.properties
